@@ -104,4 +104,35 @@ app.get("/callback", async (c) => {
   return Response.redirect(redirectTo);
 });
 
+/**
+ * Client Registration Endpoint
+ * 
+ * This route handles dynamic client registration for OAuth clients like mcp-remote.
+ * It generates and returns client credentials for the requesting client.
+ */
+app.post("/register", async (c) => {
+  try {
+    const clientInfo = await c.req.json();
+    
+    // Generate a unique client ID and secret for this registration
+    const clientId = `mcp-client-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const clientSecret = crypto.randomUUID();
+    
+    // Store the client info (in a real implementation, you'd store this in a database/KV)
+    // For this demo, we'll just return the credentials
+    const response = {
+      client_id: clientId,
+      client_secret: clientSecret,
+      client_id_issued_at: Math.floor(Date.now() / 1000),
+      client_secret_expires_at: 0, // Never expires for this demo
+      ...clientInfo // Echo back the client metadata
+    };
+    
+    return c.json(response);
+  } catch (error) {
+    console.error("Client registration error:", error);
+    return c.json({ error: "invalid_client_metadata" }, 400);
+  }
+});
+
 export { app as GitHubHandler };
