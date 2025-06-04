@@ -12,6 +12,7 @@ type Props = {
   name: string;
   email: string;
   accessToken: string;
+  idToken: string;
 };
 
 const ALLOWED_USERNAMES = new Set<string>([
@@ -48,6 +49,129 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
       };
     });
 
+    // Debug tool to inspect ID token claims and verify configuration
+    this.server.tool("debugAuth", "Debug authentication configuration and token details", {}, async () => {
+      try {
+        // 1. Verify we're using ID Token (not Access Token)
+        const tokenType = this.props.idToken ? "ID Token" : "NO ID TOKEN";
+        const hasAccessToken = this.props.accessToken ? "Yes" : "No";
+        
+        // 2. Check Authorization Header format
+        const authHeader = `Bearer ${this.props.idToken}`;
+        const headerFormat = authHeader.startsWith("Bearer ") ? "✅ Correct" : "❌ Incorrect";
+        
+        // 3. Parse ID Token to check audience and other claims
+        if (!this.props.idToken) {
+          return {
+            content: [{ type: "text", text: "❌ No ID Token available!" }],
+          };
+        }
+        
+        const tokenParts = this.props.idToken.split('.');
+        if (tokenParts.length !== 3) {
+          return {
+            content: [{ type: "text", text: "❌ Invalid JWT format" }],
+          };
+        }
+        
+        const header = JSON.parse(atob(tokenParts[0]));
+        const payload = JSON.parse(atob(tokenParts[1]));
+        
+        // Check critical claims
+        const audience = payload.aud || "NOT_SET";
+        const issuer = payload.iss || "NOT_SET";
+        const expiry = payload.exp ? new Date(payload.exp * 1000).toISOString() : "NOT_SET";
+        const isExpired = payload.exp ? Date.now() > (payload.exp * 1000) : "UNKNOWN";
+        const clientId = payload.client_id || "NOT_SET";
+        
+        const debugInfo = `🔍 AUTHENTICATION DEBUG REPORT
+        
+📋 1. TOKEN TYPE VERIFICATION:
+   Using ID Token: ${tokenType}
+   Has Access Token: ${hasAccessToken}
+   Token Length: ${this.props.idToken.length}
+
+🔑 2. AUTHORIZATION HEADER FORMAT:
+   Header: Authorization: ${authHeader.substring(0, 50)}...
+   Format Check: ${headerFormat}
+   
+🎯 3. TOKEN CLAIMS ANALYSIS:
+   Audience (aud): ${audience}
+   Client ID: ${clientId}
+   Issuer (iss): ${issuer}
+   Expires: ${expiry}
+   Is Expired: ${isExpired}
+   Subject (sub): ${payload.sub || "NOT_SET"}
+   Email: ${payload.email || "NOT_SET"}
+   
+📊 4. TOKEN STRUCTURE:
+   Algorithm: ${header.alg || "NOT_SET"}
+   Key ID: ${header.kid || "NOT_SET"}
+   Type: ${header.typ || "NOT_SET"}
+   
+⚠️  POTENTIAL ISSUES TO CHECK:
+   - Ensure audience (${audience}) matches your API Gateway Client ID
+   - Verify issuer (${issuer}) matches your Cognito User Pool
+   - Check if token is expired: ${isExpired}
+   
+🔧 BACKEND CHECKLIST:
+   - Add identitySource: ["$request.header.Authorization"] to your authorizer
+   - Verify userPoolClients includes the client with ID: ${audience}`;
+
+        return {
+          content: [
+            {
+              type: "text", 
+              text: debugInfo,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `❌ Error analyzing authentication: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    });
+
+    // Debug tool to inspect ID token claims
+    this.server.tool("debugToken", "Debug ID token claims (for troubleshooting)", {}, async () => {
+      try {
+        // Parse the ID token to see its contents
+        const tokenParts = this.props.idToken.split('.');
+        if (tokenParts.length !== 3) {
+          return {
+            content: [{ type: "text", text: "Invalid JWT format" }],
+          };
+        }
+        
+        const header = JSON.parse(atob(tokenParts[0]));
+        const payload = JSON.parse(atob(tokenParts[1]));
+        
+        return {
+          content: [
+            {
+              type: "text", 
+              text: `ID Token Debug Info:\n\nHeader:\n${JSON.stringify(header, null, 2)}\n\nPayload:\n${JSON.stringify(payload, null, 2)}\n\nToken Length: ${this.props.idToken.length}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error parsing token: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            },
+          ],
+        };
+      }
+    });
+
     // Add todo tool that calls external API
     this.server.tool(
       "add_todo",
@@ -60,6 +184,12 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
         try {
           // Generate current date and time
           const now = new Date();
+          
+          // Debug: Token info for troubleshooting
+          const tokenPreview = this.props.idToken 
+            ? `${this.props.idToken.substring(0, 20)}...${this.props.idToken.substring(this.props.idToken.length - 20)}`
+            : 'NO_TOKEN';
+          const tokenLength = this.props.idToken?.length || 0;
           
           // Format date as YYYY/MM/DD
           const date = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}`;
@@ -85,25 +215,33 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
             note: note || "",
             date,
             startTime,
-            endTime,
-            userId: this.props.sub
+            endTime
           };
 
           // Call the external API
-          const response = await fetch("https://2s627cz5fiowa22mehsoxahboq0pibpv.lambda-url.us-west-2.on.aws/tasks", {
+          const response = await fetch("https://xbc070isy8.execute-api.us-west-2.amazonaws.com/tasks", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Authorization": `Bearer ${this.props.idToken}`
             },
             body: JSON.stringify(requestBody),
           });
 
           if (!response.ok) {
+            // Try to get more error details from the response
+            let errorDetails = '';
+            try {
+              errorDetails = await response.text();
+            } catch (e) {
+              // Could not read error response body
+            }
+            
             return {
               content: [
                 {
                   type: "text",
-                  text: `Error: Failed to create todo. Status: ${response.status}`,
+                  text: `Error: Failed to create todo. Status: ${response.status}${errorDetails ? `\nDetails: ${errorDetails}` : ''}\n\nDebug Info:\nToken Preview: ${tokenPreview}\nToken Length: ${tokenLength}\nToken Type: ${this.props.idToken?.startsWith('ey') ? 'JWT' : 'Unknown'}`,
                 },
               ],
             };

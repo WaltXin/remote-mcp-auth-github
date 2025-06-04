@@ -92,6 +92,7 @@ app.get("/callback", async (c) => {
       name: given_name && family_name ? `${given_name} ${family_name}` : email,
       email,
       accessToken: tokens.access_token,
+      idToken: tokens.id_token,
     } as Props,
   });
 
