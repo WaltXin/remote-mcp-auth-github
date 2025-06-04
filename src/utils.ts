@@ -87,3 +87,100 @@ export type Props = {
   email: string;
   accessToken: string;
 };
+
+/**
+ * Builds the Cognito authorization URL for OAuth flow.
+ */
+export function getCognitoAuthorizeUrl({
+  cognito_domain,
+  client_id,
+  redirect_uri,
+  state,
+}: {
+  cognito_domain: string;
+  client_id: string;
+  redirect_uri: string;
+  state: string;
+}): string {
+  const url = new URL(`https://${cognito_domain}/oauth2/authorize`);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', client_id);
+  url.searchParams.set('redirect_uri', redirect_uri);
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('state', state);
+  
+  return url.toString();
+}
+
+/**
+ * Fetches an authorization token from Cognito.
+ */
+export async function fetchCognitoAuthToken({
+  client_id,
+  client_secret,
+  code,
+  redirect_uri,
+  cognito_domain,
+}: {
+  code: string | undefined;
+  cognito_domain: string;
+  client_secret: string;
+  redirect_uri: string;
+  client_id: string;
+}): Promise<[any, null] | [null, Response]> {
+  if (!code) {
+    return [null, new Response("Missing code", { status: 400 })];
+  }
+
+  const tokenUrl = `https://${cognito_domain}/oauth2/token`;
+  
+  const resp = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id,
+      client_secret,
+      code,
+      redirect_uri,
+    }).toString(),
+  });
+  
+  if (!resp.ok) {
+    console.log(await resp.text());
+    return [null, new Response("Failed to fetch access token", { status: 500 })];
+  }
+  
+  const tokens = await resp.json() as {
+    access_token?: string;
+    id_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+  
+  if (!tokens.access_token || !tokens.id_token) {
+    return [null, new Response("Missing tokens in response", { status: 400 })];
+  }
+  
+  return [tokens, null];
+}
+
+/**
+ * Parses a JWT token and returns the payload.
+ */
+export function parseJWT(token: string): any {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT format');
+    }
+    const payload = JSON.parse(atob(parts[1]));
+    return payload;
+  } catch (error) {
+    console.error('Error parsing JWT:', error);
+    throw new Error('Failed to parse JWT token');
+  }
+}
