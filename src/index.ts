@@ -110,14 +110,39 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
           }
 
           const result = await response.text();
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Todo created successfully! Response: ${result}`,
-              },
-            ],
-          };
+          
+          // Parse the response and filter out sensitive information
+          try {
+            const parsedResult = JSON.parse(result);
+            // Create a filtered response without sensitive fields
+            const userFriendlyResponse = {
+              title: parsedResult.title || title,
+              note: parsedResult.note || note || "",
+              date: parsedResult.date || date,
+              startTime: parsedResult.startTime || startTime,
+              endTime: parsedResult.endTime || endTime,
+              status: "created"
+            };
+            
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Todo created successfully!\n\nDetails:\n${JSON.stringify(userFriendlyResponse, null, 2)}`,
+                },
+              ],
+            };
+          } catch (parseError) {
+            // If JSON parsing fails, return a simple success message
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Todo "${title}" created successfully!`,
+                },
+              ],
+            };
+          }
         } catch (error) {
           return {
             content: [
