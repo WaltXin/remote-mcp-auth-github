@@ -88,6 +88,9 @@ export type Props = {
   email: string;
   accessToken: string;
   idToken: string;
+  refreshToken: string;
+  tokenExpiresAt: number; // Unix timestamp when access token expires
+  tokenIssuedAt: number;  // Unix timestamp when tokens were issued/refreshed
 };
 
 /**
@@ -185,4 +188,88 @@ export function parseJWT(token: string): any {
     console.error('Error parsing JWT:', error);
     throw new Error('Failed to parse JWT token');
   }
+}
+
+/**
+ * Refreshes Cognito tokens using the refresh token.
+ */
+export async function refreshCognitoTokens({
+  client_id,
+  client_secret,
+  refresh_token,
+  cognito_domain,
+}: {
+  refresh_token: string;
+  cognito_domain: string;
+  client_secret: string;
+  client_id: string;
+}): Promise<[any, null] | [null, Response]> {
+  const tokenUrl = `https://${cognito_domain}/oauth2/token`;
+  
+  const resp = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id,
+      client_secret,
+      refresh_token,
+    }).toString(),
+  });
+  
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    console.error('Failed to refresh tokens:', errorText);
+    return [null, new Response("Failed to refresh tokens", { status: 500 })];
+  }
+  
+  const tokens = await resp.json() as {
+    access_token?: string;
+    id_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  };
+  
+  if (!tokens.access_token || !tokens.id_token) {
+    return [null, new Response("Missing tokens in refresh response", { status: 400 })];
+  }
+  
+  return [tokens, null];
+}
+
+/**
+ * Checks if a token is about to expire (within 5 minutes).
+ */
+export function isTokenNearExpiry(tokenIssuedAt: number, expiryMinutes: number = 60): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  const tokenExpiresAt = tokenIssuedAt + (expiryMinutes * 60);
+  const fiveMinutesFromNow = now + (5 * 60);
+  
+  return tokenExpiresAt <= fiveMinutesFromNow;
+}
+
+/**
+ * Creates updated Props with new token information.
+ */
+export function updatePropsWithTokens(currentProps: Props, tokens: any): Props {
+  const now = Math.floor(Date.now() / 1000);
+  const idTokenPayload = parseJWT(tokens.id_token);
+  
+  return {
+    ...currentProps,
+    accessToken: tokens.access_token,
+    idToken: tokens.id_token,
+    refreshToken: tokens.refresh_token || currentProps.refreshToken, // Keep existing if not provided
+    tokenIssuedAt: now,
+    tokenExpiresAt: now + (60 * 60), // 60 minutes from now
+    // Update user info from new ID token in case it changed
+    sub: idTokenPayload.sub || currentProps.sub,
+    email: idTokenPayload.email || currentProps.email,
+    name: (idTokenPayload.given_name && idTokenPayload.family_name) 
+      ? `${idTokenPayload.given_name} ${idTokenPayload.family_name}` 
+      : idTokenPayload.email || currentProps.name,
+  };
 }

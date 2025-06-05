@@ -51,6 +51,54 @@ Enter `https://mcp-github-oauth.<your-subdomain>.workers.dev/sse` and hit connec
 
 You now have a remote MCP server deployed! 
 
+### Token Auto-Refresh Feature
+
+This MCP server includes an automatic token refresh mechanism that ensures users stay authenticated for up to **3650 days (10 years)** without any interruption:
+
+#### How it works:
+- **Initial Login**: User logs in once through OAuth flow
+- **Long-term Access**: Tokens are automatically refreshed every hour (before expiry)
+- **Transparent Operation**: No user intervention required - refreshing happens in the background
+- **Maximum Duration**: Using AWS Cognito's refresh token validity of 3650 days
+
+#### Available Endpoints:
+
+1. **`/validate-token`** - Validates and auto-refreshes tokens if needed
+   ```bash
+   POST /validate-token
+   Content-Type: application/json
+   
+   {
+     "props": {
+       "refreshToken": "your-refresh-token",
+       "tokenIssuedAt": 1234567890,
+       // ... other token properties
+     }
+   }
+   ```
+
+2. **`/refresh`** - Explicitly refresh tokens using refresh token
+   ```bash
+   POST /refresh
+   Content-Type: application/json
+   
+   {
+     "refresh_token": "your-refresh-token",
+     "user_id": "optional-user-id"
+   }
+   ```
+
+#### Token Lifecycle:
+- **Access Token**: Valid for 1 hour
+- **ID Token**: Valid for 1 hour  
+- **Refresh Token**: Valid for 3650 days
+- **Auto-refresh**: Triggered 5 minutes before access token expires
+
+This means users can:
+- Login once and stay authenticated for years
+- Experience zero interruptions during normal usage
+- Have tokens automatically renewed in the background
+
 ### Access Control
 
 This MCP server uses GitHub OAuth for authentication. All authenticated GitHub users can access basic tools like "add" and "userInfoOctokit".
