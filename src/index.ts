@@ -123,16 +123,16 @@ export class MyMCP extends McpAgent<Env, {}, SimpleProps> {
               startTime: parsedResult.startTime || startTime,
               endTime: parsedResult.endTime || endTime,
               status: "created",
-              mode: "Dynamic API Key",
+              mode: " ",
               apiKeyUsed: effectiveApiKey.substring(0, 8) + "..."
             };
             
             return {
-              content: [{ type: "text", text: `Todo created with dynamic API Key!\n\nDetails:\n${JSON.stringify(userFriendlyResponse, null, 2)}` }],
+              content: [{ type: "text", text: `Todo created!\n\nDetails:\n${JSON.stringify(userFriendlyResponse, null, 2)}` }],
             };
           } catch (parseError) {
             return {
-              content: [{ type: "text", text: `Todo "${title}" created successfully with dynamic API Key!` }],
+              content: [{ type: "text", text: `Todo "${title}" created successfully with zimi!` }],
             };
           }
         } catch (error) {
