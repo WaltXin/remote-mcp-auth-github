@@ -3,13 +3,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
 /*
- * 🎉 DYNAMIC API KEY MODE 🎉
+ * 🎯 TODO SERVER 🎯
  * 
- * This MCP Server uses dynamic API Key authentication:
- * - NO OAuth flow - no browser popups
- * - Direct connection
- * - API Key passed from Claude Desktop config
- * - All API calls use dynamic x-api-key header
+ * Simple todo management server with API Key authentication:
+ * - Direct connection, no OAuth
+ * - Create todo items with title and notes
+ * - Dynamic API Key from Claude Desktop config
  */
 
 // Simplified Props (no OAuth fields needed)
@@ -20,8 +19,8 @@ type SimpleProps = {
 
 export class MyMCP extends McpAgent<Env, {}, SimpleProps> {
   server = new McpServer({
-    name: "Dynamic API Key MCP Server",
-    version: "3.0.0",
+    name: "Todo Server",
+    version: "1.0.0",
   });
 
   /**
@@ -48,26 +47,6 @@ export class MyMCP extends McpAgent<Env, {}, SimpleProps> {
   }
 
   async init() {
-    // Get API Key info
-    this.server.tool("userInfo", "Get current authentication mode", {}, async () => {
-      const apiKey = this.getApiKey();
-      
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              authMode: "Dynamic API Key Mode",
-              apiKey: apiKey ? (apiKey.substring(0, 8) + "...") : "Not provided",
-              message: "API Key passed from Claude Desktop config",
-              noPopups: true,
-              hasApiKey: !!apiKey
-            }, null, 2),
-          },
-        ],
-      };
-    });
-
     // Add todo tool with dynamic API Key
     this.server.tool(
       "add_todo",
@@ -159,66 +138,6 @@ export class MyMCP extends McpAgent<Env, {}, SimpleProps> {
         } catch (error) {
           return {
             content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}` }],
-          };
-        }
-      }
-    );
-
-    // Test API Key connectivity
-    this.server.tool(
-      "test_api_key", 
-      "Test dynamic API Key connectivity", 
-      {
-        apiKey: z.string().optional().describe("API Key to test (auto-provided by config)")
-      },
-      async ({ apiKey }) => {
-        try {
-          const effectiveApiKey = apiKey || this.getApiKey();
-          
-          if (!effectiveApiKey) {
-            return {
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  mode: "Dynamic API Key Test",
-                  error: "No API Key provided",
-                  message: "Please configure API_KEY in Claude Desktop config",
-                  timestamp: new Date().toISOString()
-                }, null, 2),
-              }],
-            };
-          }
-
-          const testResponse = await fetch("https://xbc070isy8.execute-api.us-west-2.amazonaws.com/tasks", {
-            method: "GET",
-            headers: { "x-api-key": effectiveApiKey }
-          });
-
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                mode: "Dynamic API Key Test",
-                apiKey: effectiveApiKey.substring(0, 8) + "...",
-                dynamicKey: true,
-                testResult: {
-                  status: testResponse.status,
-                  success: testResponse.ok
-                },
-                timestamp: new Date().toISOString()
-              }, null, 2),
-            }],
-          };
-        } catch (error) {
-          return {
-            content: [{
-              type: "text",
-              text: JSON.stringify({
-                mode: "Dynamic API Key Test",
-                error: error instanceof Error ? error.message : "Unknown error",
-                timestamp: new Date().toISOString()
-              }, null, 2),
-            }],
           };
         }
       }
