@@ -31,16 +31,11 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
   });
 
   /**
-   * Check if token needs refresh and refresh it if necessary
-   * This ensures we always have valid tokens before making API calls
+   * Attempt to refresh token only when API call fails with 401
+   * This is a more conservative approach that doesn't interfere with MCP client's OAuth flow
    */
-  private async ensureValidTokens(): Promise<void> {
-    // Check if token needs refresh (within 5 minutes of expiry)
-    if (!isTokenNearExpiry(this.props.tokenIssuedAt)) {
-      return; // No refresh needed
-    }
-
-    console.log(`Token for user ${this.props.sub} is near expiry, attempting refresh...`);
+  private async refreshTokenOnFailure(): Promise<boolean> {
+    console.log(`Attempting token refresh after API failure for user ${this.props.sub}`);
 
     try {
       // Attempt to refresh tokens
@@ -53,7 +48,7 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
 
       if (errResponse) {
         console.error(`Failed to refresh tokens for user ${this.props.sub}:`, errResponse.status);
-        return; // Keep using current props if refresh fails
+        return false;
       }
 
       // Update props with new tokens
@@ -63,17 +58,45 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
       Object.assign(this.props, updatedProps);
       
       console.log(`Successfully refreshed tokens for user ${this.props.sub}`);
+      return true;
     } catch (error) {
       console.error(`Error during token refresh for user ${this.props.sub}:`, error);
+      return false;
     }
+  }
+
+  /**
+   * Make API call with automatic retry on 401 (token expiry)
+   */
+  private async makeApiCallWithRetry(url: string, options: RequestInit, maxRetries: number = 1): Promise<Response> {
+    let response = await fetch(url, options);
+    
+    // If we get 401 and still have retries left, try to refresh token and retry
+    if (response.status === 401 && maxRetries > 0) {
+      console.log(`API call failed with 401, attempting token refresh...`);
+      
+      const refreshSuccess = await this.refreshTokenOnFailure();
+      if (refreshSuccess) {
+        // Update the Authorization header with new token
+        const newOptions = {
+          ...options,
+          headers: {
+            ...options.headers,
+            "Authorization": `Bearer ${this.props.idToken}`
+          }
+        };
+        
+        console.log(`Retrying API call with refreshed token...`);
+        response = await fetch(url, newOptions);
+      }
+    }
+    
+    return response;
   }
 
   async init() {
     // Get user info from Cognito authentication
     this.server.tool("userInfo", "Get user info from Cognito authentication", {}, async () => {
-      // 🔄 Ensure we have valid tokens
-      await this.ensureValidTokens();
-      
       const now = Math.floor(Date.now() / 1000);
       const tokenAge = now - this.props.tokenIssuedAt;
       const tokenExpiresIn = this.props.tokenExpiresAt - now;
@@ -112,9 +135,6 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
       },
       async ({ title, note }) => {
         try {
-          // 🔄 Ensure we have valid tokens before making API call
-          await this.ensureValidTokens();
-
           // Generate current date and time
           const now = new Date();
           
@@ -147,8 +167,8 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
 
           console.log(`Making API call with token issued at: ${this.props.tokenIssuedAt}, current time: ${Math.floor(Date.now() / 1000)}`);
 
-          // Call the external API
-          const response = await fetch("https://xbc070isy8.execute-api.us-west-2.amazonaws.com/tasks", {
+          // Call the external API with automatic retry on 401
+          const response = await this.makeApiCallWithRetry("https://xbc070isy8.execute-api.us-west-2.amazonaws.com/tasks", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -232,9 +252,6 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
             ),
         },
         async ({ prompt, steps }) => {
-          // 🔄 Ensure we have valid tokens before making API call
-          await this.ensureValidTokens();
-          
           const response = await this.env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
             prompt,
             steps,
@@ -271,7 +288,7 @@ export class MyMCP extends McpAgent<Env, {}, Props> {
 
         if (forceRefresh || needsRefresh) {
           console.log(`Forcing token refresh for user ${this.props.sub}`);
-          await this.ensureValidTokens();
+          await this.refreshTokenOnFailure();
         }
 
         const afterNow = Math.floor(Date.now() / 1000);
