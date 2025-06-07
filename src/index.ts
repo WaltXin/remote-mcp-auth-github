@@ -15,8 +15,11 @@ import { z } from "zod";
 
 interface Env { [k: string]: unknown }
 
-// Global connection-based API key storage (keyed by connection fingerprint)
+// Global connection-based API key storage (keyed by sessionId if present, otherwise fallback fingerprint)
 const connectionApiKeys = new Map<string, { apiKey: string, lastUsed: number }>();
+
+// Allow up to 12k live connections before we start evicting oldest entries
+const MAX_CONNECTIONS = 12000;
 
 // Store current request's API key for access during tool execution
 let currentRequestApiKey: string | null = null;
@@ -132,6 +135,13 @@ class ApiKeyWorker {
     return fingerprint
   }
 
+  /** Prefer sessionId (from Claude Desktop) for connection grouping; fallback to fingerprint */
+  private getConnectionKey(req: Request, url: URL): string {
+    const sid = url.searchParams.get('sessionId')
+    if (sid) return sid
+    return this.getConnectionFingerprint(req)
+  }
+
   private cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -151,19 +161,19 @@ class ApiKeyWorker {
     // root → /sse convenience redirect
     if (pathname === "/") return Response.redirect("/sse", 302)
 
-    // Extract API key and create connection fingerprint
+    // Extract API key and derive connection key (sessionId preferred)
     const apiKey = this.extract(req)
-    const fingerprint = this.getConnectionFingerprint(req)
+    const connKey = this.getConnectionKey(req, url)
 
-    console.log(`Fingerprint: ${fingerprint}, HasApiKey: ${!!apiKey}, Path: ${pathname}`)
+    console.log(`ConnKey: ${connKey}, HasApiKey: ${!!apiKey}, Path: ${pathname}`)
 
     // Store API key for this connection when we first see it
     if (apiKey) {
-      console.log(`Storing API key for connection ${fingerprint}: ${apiKey.slice(0, 8)}...`)
-      connectionApiKeys.set(fingerprint, { apiKey, lastUsed: Date.now() })
-      
-      // Clean up old connections periodically (keep last 500, remove older than 1 hour)
-      if (connectionApiKeys.size > 500) {
+      console.log(`Storing API key for connection ${connKey}: ${apiKey.slice(0, 8)}...`)
+      connectionApiKeys.set(connKey, { apiKey, lastUsed: Date.now() })
+
+      // Evict stale entries if we exceed MAX_CONNECTIONS or older than 1 hour
+      if (connectionApiKeys.size > MAX_CONNECTIONS) {
         const cutoff = Date.now() - 60 * 60 * 1000 // 1 hour ago
         for (const [key, value] of connectionApiKeys.entries()) {
           if (value.lastUsed < cutoff) {
@@ -174,7 +184,7 @@ class ApiKeyWorker {
     }
 
     // Get stored API key for this connection
-    const storedConnection = connectionApiKeys.get(fingerprint)
+    const storedConnection = connectionApiKeys.get(connKey)
     const effectiveApiKey = apiKey || storedConnection?.apiKey || null
 
     console.log(`EffectiveApiKey: ${effectiveApiKey ? effectiveApiKey.slice(0, 8) + '...' : 'none'}, ConnectionKeys: ${connectionApiKeys.size}`)
