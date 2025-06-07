@@ -13,15 +13,15 @@
 	"migrations": [
 		{
 			"new_sqlite_classes": [
-				"MyMCP"
+				"MyMCPv2"
 			],
-			"tag": "v1"
+			"tag": "v2"
 		}
 	],
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "MyMCP",
+				"class_name": "MyMCPv2",
 				"name": "MCP_OBJECT"
 			}
 		]
